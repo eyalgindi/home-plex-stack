@@ -9,7 +9,11 @@ services:
   # ============================================================================
   # Traefik - Reverse Proxy
   # ============================================================================
+  # Note: Traefik is optional. Use --profile traefik to start it.
+  # Example: docker compose --profile traefik up -d
   traefik:
+    profiles:
+      - traefik
     image: traefik:v3.0
     container_name: plex-traefik
     restart: unless-stopped

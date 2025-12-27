@@ -11,6 +11,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/env.example"
+HOME_DIR="${HOME:-/home/$(whoami)}"
+DEFAULT_DOCKER_PATH="${HOME_DIR}/Docker"
+DEFAULT_PLEX_PATH="${HOME_DIR}/plex"
 
 # Colors for output
 RED='\033[0;31m'
@@ -205,8 +208,28 @@ echo
 # Traefik Configuration
 # ============================================================================
 print_info "=== Traefik Reverse Proxy Configuration ==="
+print_info "Traefik provides reverse proxy with SSL certificates for external access."
+print_info "If you're running locally only, you can skip Traefik setup."
+echo
 while true; do
-    prompt_with_default "Traefik IP Address" "172.21.0.10" "TRAEFIK_IP"
+    read -p "Enable Traefik reverse proxy? (Y/n): " enable_traefik_input
+    enable_traefik_input=${enable_traefik_input:-Y}
+    if [[ "$enable_traefik_input" =~ ^[Yy]$ ]]; then
+        ENABLE_TRAEFIK=true
+        break
+    elif [[ "$enable_traefik_input" =~ ^[Nn]$ ]]; then
+        ENABLE_TRAEFIK=false
+        print_info "Traefik will be skipped. Services will be accessible via direct ports."
+        echo
+        break
+    else
+        print_error "Please enter Y or N"
+    fi
+done
+
+if [ "$ENABLE_TRAEFIK" = "true" ]; then
+    while true; do
+        prompt_with_default "Traefik IP Address" "172.21.0.10" "TRAEFIK_IP"
     if validate_ip "$TRAEFIK_IP"; then
         break
     else
@@ -259,11 +282,26 @@ while true; do
     fi
 done
 
-prompt_with_default "Traefik Log Level" "INFO" "TRAEFIK_LOG_LEVEL"
-prompt_with_default "Traefik Let's Encrypt Path" "/nfs/data/docker/traefik/letsencrypt" "TRAEFIK_LETSENCRYPT_PATH"
-prompt_with_default "Cloudflare DNS API Token (leave empty if not using Cloudflare)" "" "CF_DNS_API_TOKEN"
-prompt_with_default "Traefik Middleware (e.g., 'authelia@docker' or leave empty)" "" "TRAEFIK_MIDDLEWARE"
-echo
+    prompt_with_default "Traefik Log Level" "INFO" "TRAEFIK_LOG_LEVEL"
+    prompt_with_default "Traefik Let's Encrypt Path" "${DEFAULT_DOCKER_PATH}/traefik/letsencrypt" "TRAEFIK_LETSENCRYPT_PATH"
+    prompt_with_default "Cloudflare DNS API Token (leave empty if not using Cloudflare)" "" "CF_DNS_API_TOKEN"
+    prompt_with_default "Traefik Middleware (e.g., 'authelia@docker' or leave empty)" "" "TRAEFIK_MIDDLEWARE"
+    echo
+else
+    # Set default values for Traefik (not used but needed for .env)
+    TRAEFIK_IP="172.21.0.10"
+    TRAEFIK_HTTP_PORT="80"
+    TRAEFIK_HTTPS_PORT="443"
+    TRAEFIK_DASHBOARD_PORT="8088"
+    TRAEFIK_DOMAIN="traefik.local"
+    TRAEFIK_ACME_EMAIL="disabled@local"
+    TRAEFIK_LOG_LEVEL="INFO"
+    TRAEFIK_LETSENCRYPT_PATH="${DEFAULT_DOCKER_PATH}/traefik/letsencrypt"
+    TRAEFIK_MIDDLEWARE=""
+    CF_DNS_API_TOKEN=""
+    print_info "Traefik configuration skipped. Services will use direct port access."
+    echo
+fi
 
 # ============================================================================
 # Database Configuration
@@ -343,8 +381,8 @@ prompt_with_default "Enable Overseerr integration? (true/false)" "true" "RIVEN_C
 prompt_with_default "Enable Plex Watchlist monitoring? (true/false)" "true" "RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED"
 prompt_with_default "Plex Watchlist update interval (seconds)" "60" "RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL"
 prompt_with_default "Enable Torrentio scraping? (true/false)" "false" "RIVEN_SCRAPING_TORRENTIO_ENABLED"
-prompt_with_default "Rclone symlink path" "/nfs/data/docker/storageRD/torrents/__all__" "RIVEN_SYMLINK_RCLONE_PATH"
-prompt_with_default "Plex library path" "/nfs/media/plex" "RIVEN_SYMLINK_LIBRARY_PATH"
+prompt_with_default "Rclone symlink path" "${DEFAULT_DOCKER_PATH}/storageRD/torrents/__all__" "RIVEN_SYMLINK_RCLONE_PATH"
+prompt_with_default "Plex library path" "${DEFAULT_PLEX_PATH}" "RIVEN_SYMLINK_LIBRARY_PATH"
 prompt_with_default "Riven webhook URL for Overseerr" "http://riven:8080/api/v1/webhook/overseerr" "RIVEN_WEBHOOK_OVERSEERR_URL"
 echo
 
@@ -425,10 +463,14 @@ validate_ip_input "FlareSolverr IP" "172.21.0.20" "FLARESOLVERR_IP"
 
 # Check for IP conflicts
 print_info "Checking for IP address conflicts..."
-declare -a IPS=("$TRAEFIK_IP" "$ZURG_IP" "$RCLONE_IP" "$ZURGER_IP" "$RIVEN_DB_IP" "$ZILEAN_IP" "$OVERSEERR_IP" "$RIVEN_IP" "$RIVEN_FRONTEND_IP" "$FLARESOLVERR_IP")
+if [ "$ENABLE_TRAEFIK" = "true" ]; then
+    declare -a IPS=("$TRAEFIK_IP" "$ZURG_IP" "$RCLONE_IP" "$ZURGER_IP" "$RIVEN_DB_IP" "$ZILEAN_IP" "$OVERSEERR_IP" "$RIVEN_IP" "$RIVEN_FRONTEND_IP" "$FLARESOLVERR_IP")
+else
+    declare -a IPS=("$ZURG_IP" "$RCLONE_IP" "$ZURGER_IP" "$RIVEN_DB_IP" "$ZILEAN_IP" "$OVERSEERR_IP" "$RIVEN_IP" "$RIVEN_FRONTEND_IP" "$FLARESOLVERR_IP")
+fi
 declare -A IP_COUNT
 for ip in "${IPS[@]}"; do
-    ((IP_COUNT["$ip"]++))
+    IP_COUNT["$ip"]=$((${IP_COUNT["$ip"]:-0} + 1))
 done
 CONFLICTS=0
 for ip in "${!IP_COUNT[@]}"; do
@@ -448,20 +490,20 @@ echo
 # Path Configuration
 # ============================================================================
 print_info "=== Path Configuration ==="
-prompt_with_default "Zurg Config Path" "/nfs/data/docker/zurg/config.yml" "ZURG_CONFIG_PATH"
-prompt_with_default "Zurg Data Path" "/nfs/data/docker/zurg/" "ZURG_DATA_PATH"
-prompt_with_default "Zurger Build Context" "/nfs/data/docker/zurger" "ZURGER_BUILD_CONTEXT"
-prompt_with_default "Zurger Templates Path" "/nfs/data/docker/zurger/templates" "ZURGER_TEMPLATES_PATH"
-prompt_with_default "Zurger Config Path" "/nfs/data/docker/zurger/config.ini" "ZURGER_CONFIG_PATH"
-prompt_with_default "Zurger Trigger Path" "/nfs/media/zurger/" "ZURGER_TRIGGER_PATH"
-prompt_with_default "Rclone Config Path" "/nfs/data/docker/rclone/rclone.conf" "RCLONE_CONFIG_PATH"
-prompt_with_default "Storage Torrents Path" "/nfs/data/docker/storageRD/torrents" "STORAGE_TORRENTS_PATH"
-prompt_with_default "Storage RD Path" "/nfs/data/docker/storageRD" "STORAGE_RD_PATH"
-prompt_with_default "Plex Library Path" "/nfs/media/plex" "PLEX_LIBRARY_PATH"
-prompt_with_default "Zilean Data Path" "/nfs/data/docker/zilean" "ZILEAN_DATA_PATH"
-prompt_with_default "Overseerr Config Path" "/nfs/data/docker/overseerr/config" "OVERSEERR_CONFIG_PATH"
-prompt_with_default "Riven Data Path" "/nfs/data/docker/riven/data" "RIVEN_DATA_PATH"
-prompt_with_default "Riven DB Path" "/nfs/data/docker/riven-db" "RIVEN_DB_PATH"
+prompt_with_default "Zurg Config Path" "${DEFAULT_DOCKER_PATH}/zurg/config.yml" "ZURG_CONFIG_PATH"
+prompt_with_default "Zurg Data Path" "${DEFAULT_DOCKER_PATH}/zurg/" "ZURG_DATA_PATH"
+prompt_with_default "Zurger Build Context" "${DEFAULT_DOCKER_PATH}/zurger" "ZURGER_BUILD_CONTEXT"
+prompt_with_default "Zurger Templates Path" "${DEFAULT_DOCKER_PATH}/zurger/templates" "ZURGER_TEMPLATES_PATH"
+prompt_with_default "Zurger Config Path" "${DEFAULT_DOCKER_PATH}/zurger/config.ini" "ZURGER_CONFIG_PATH"
+prompt_with_default "Zurger Trigger Path" "${DEFAULT_PLEX_PATH}/zurger/" "ZURGER_TRIGGER_PATH"
+prompt_with_default "Rclone Config Path" "${DEFAULT_DOCKER_PATH}/rclone/rclone.conf" "RCLONE_CONFIG_PATH"
+prompt_with_default "Storage Torrents Path" "${DEFAULT_DOCKER_PATH}/storageRD/torrents" "STORAGE_TORRENTS_PATH"
+prompt_with_default "Storage RD Path" "${DEFAULT_DOCKER_PATH}/storageRD" "STORAGE_RD_PATH"
+prompt_with_default "Plex Library Path" "${DEFAULT_PLEX_PATH}" "PLEX_LIBRARY_PATH"
+prompt_with_default "Zilean Data Path" "${DEFAULT_DOCKER_PATH}/zilean" "ZILEAN_DATA_PATH"
+prompt_with_default "Overseerr Config Path" "${DEFAULT_DOCKER_PATH}/overseerr/config" "OVERSEERR_CONFIG_PATH"
+prompt_with_default "Riven Data Path" "${DEFAULT_DOCKER_PATH}/riven/data" "RIVEN_DATA_PATH"
+prompt_with_default "Riven DB Path" "${DEFAULT_DOCKER_PATH}/riven-db" "RIVEN_DB_PATH"
 echo
 
 # ============================================================================
@@ -501,6 +543,7 @@ PLEX_NETWORK_SUBNET=${PLEX_NETWORK_SUBNET}
 # ----------------------------------------------------------------------------
 # Traefik Configuration
 # ----------------------------------------------------------------------------
+ENABLE_TRAEFIK=${ENABLE_TRAEFIK}
 TRAEFIK_IP=${TRAEFIK_IP}
 TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT}
 TRAEFIK_HTTPS_PORT=${TRAEFIK_HTTPS_PORT}
@@ -633,6 +676,7 @@ PLEX_NETWORK_SUBNET=${PLEX_NETWORK_SUBNET}
 # ----------------------------------------------------------------------------
 # Traefik Configuration
 # ----------------------------------------------------------------------------
+ENABLE_TRAEFIK=${ENABLE_TRAEFIK}
 TRAEFIK_IP=${TRAEFIK_IP}
 TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT}
 TRAEFIK_HTTPS_PORT=${TRAEFIK_HTTPS_PORT}
@@ -763,7 +807,9 @@ check_path "$ZURGER_TEMPLATES_PATH" "Zurger Templates"
 check_path "$ZURGER_CONFIG_PATH" "Zurger Config"
 check_path "$RCLONE_CONFIG_PATH" "Rclone Config"
 check_path "$PLEX_LIBRARY_PATH" "Plex Library"
-check_path "$TRAEFIK_LETSENCRYPT_PATH" "Traefik Let's Encrypt"
+if [ "$ENABLE_TRAEFIK" = "true" ]; then
+    check_path "$TRAEFIK_LETSENCRYPT_PATH" "Traefik Let's Encrypt"
+fi
 
 if [ ${#MISSING_PATHS[@]} -gt 0 ]; then
     print_warning "The following paths do not exist:"
@@ -845,7 +891,12 @@ else
     echo "  1. Review the generated .env file: ${ENV_FILE}"
     echo "  2. Make any necessary adjustments to paths or configuration"
     echo "  3. Validate configuration: docker compose config"
-    echo "  4. Start the services: docker compose up -d"
+    if [ "$ENABLE_TRAEFIK" = "true" ]; then
+        echo "  4. Start all services (including Traefik): docker compose --profile traefik up -d"
+    else
+        echo "  4. Start services (without Traefik): docker compose up -d"
+        echo "     Services will be accessible via direct ports (see docker-compose.yml)"
+    fi
     echo "  5. Check logs: docker compose logs -f"
     echo "  6. Configure Overseerr webhook:"
     echo "     - Login to Overseerr"

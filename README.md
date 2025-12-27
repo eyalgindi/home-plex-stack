@@ -43,11 +43,12 @@ This stack automates the entire media acquisition and management workflow:
 ### 1. Run Setup Script
 
 ```bash
-cd /nfs/data/docker/home_plex
+cd ~/home_plex  # or wherever you cloned/extracted this
 ./setup.sh
 ```
 
 The setup script will:
+- Ask if you want to enable Traefik (skip for local-only setups)
 - Prompt for all required configuration values
 - Generate a `.env` file organized by application
 - Verify paths exist
@@ -55,9 +56,17 @@ The setup script will:
 
 ### 2. Start Services
 
+**With Traefik (for external access with SSL):**
+```bash
+docker compose --profile traefik up -d
+```
+
+**Without Traefik (for local-only access via direct ports):**
 ```bash
 docker compose up -d
 ```
+
+> **Note:** If you skipped Traefik during setup, services will be accessible via direct ports (see `docker-compose.yml` for port mappings). Traefik labels on services will be ignored when Traefik is not running.
 
 ### 3. Configure Webhooks (Optional)
 
@@ -105,7 +114,7 @@ docker exec overseerr ping -c 1 riven
        │    └──► Real-Debrid (External API)
        │
        └──► Creates symlinks
-            └──► /nfs/media/plex (Plex Library)
+            └──► ~/plex (Plex Library on host, mounted as /nfs/media/plex in containers)
                  │
                  └──► Triggers Plex library scan
 
@@ -113,7 +122,7 @@ Real-Debrid ──► Zurg (Monitors downloads)
                  │
                  ├──► WebDAV: http://zurg:9999/dav
                  │    └──► Rclone (Mounts as filesystem)
-                 │         └──► /nfs/data/docker/storageRD/torrents
+                 │         └──► ~/Docker/storageRD/torrents (on host, mounted as /nfs/data/docker/storageRD/torrents in containers)
                  │              │
                  │              └──► Zurger (Reads & organizes)
                  │                   │
@@ -196,7 +205,7 @@ Real-Debrid ──► Zurg (Monitors downloads)
 **Purpose**: Mounts Zurg's WebDAV interface as a local filesystem.
 
 **Configuration**:
-- Mount Point: `/nfs/data/docker/storageRD/torrents`
+- Mount Point: `~/Docker/storageRD/torrents` (host) → `/nfs/data/docker/storageRD/torrents` (container)
 - Zurg WebDAV: `http://zurg:9999/dav`
 - Requires FUSE support
 
@@ -844,13 +853,13 @@ docker exec riven pg_isready -h riven-db -p 5432
 
 4. Check Zurger can access mount:
    ```bash
-   docker exec zurger ls /nfs/data/docker/storageRD/torrents | head -5
+   docker exec zurger ls /nfs/data/docker/storageRD/torrents | head -5  # Container path
    ```
 
 5. Verify Plex library paths:
    ```bash
-   docker exec zurger ls /nfs/media/plex/movies | head -5
-   docker exec zurger ls /nfs/media/plex/shows | head -5
+   docker exec zurger ls /nfs/media/plex/movies | head -5  # Container path
+   docker exec zurger ls /nfs/media/plex/shows | head -5  # Container path
    ```
 
 ### Library Not Updating
@@ -923,19 +932,19 @@ home_plex/
 
 ### Key Paths
 
-| Purpose | Default Path |
+| Purpose | Default Path (Host) |
 |---------|-------------|
-| Zurg Config | `/nfs/data/docker/zurg/config.yml` |
-| Zurg Data | `/nfs/data/docker/zurg/` |
-| Zurger Config | `/nfs/data/docker/zurger/config.ini` |
-| Rclone Config | `/nfs/data/docker/rclone/rclone.conf` |
-| Storage Torrents | `/nfs/data/docker/storageRD/torrents` |
-| Plex Library | `/nfs/media/plex` |
-| Zilean Data | `/nfs/data/docker/zilean` |
-| Overseerr Config | `/nfs/data/docker/overseerr/config` |
-| Riven Data | `/nfs/data/docker/riven/data` |
-| Riven DB | `/nfs/data/docker/riven-db` |
-| Traefik Let's Encrypt | `/nfs/data/docker/traefik/letsencrypt` |
+| Zurg Config | `~/Docker/zurg/config.yml` |
+| Zurg Data | `~/Docker/zurg/` |
+| Zurger Config | `~/Docker/zurger/config.ini` |
+| Rclone Config | `~/Docker/rclone/rclone.conf` |
+| Storage Torrents | `~/Docker/storageRD/torrents` |
+| Plex Library | `~/plex` |
+| Zilean Data | `~/Docker/zilean` |
+| Overseerr Config | `~/Docker/overseerr/config` |
+| Riven Data | `~/Docker/riven/data` |
+| Riven DB | `~/Docker/riven-db` |
+| Traefik Let's Encrypt | `~/Docker/traefik/letsencrypt` |
 
 ### Port Reference
 
