@@ -1,0 +1,451 @@
+#!/bin/bash
+
+# ============================================================================
+# Home Plex Entertainment Stack - Setup Script
+# ============================================================================
+# This script guides you through the configuration of the entertainment stack
+# ============================================================================
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${SCRIPT_DIR}/.env"
+ENV_EXAMPLE="${SCRIPT_DIR}/env.example"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Print colored output
+print_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to prompt for input with default value
+prompt_with_default() {
+    local prompt="$1"
+    local default="$2"
+    local var_name="$3"
+    local is_secret="${4:-false}"
+    
+    if [ "$is_secret" = "true" ]; then
+        read -sp "${prompt} [default: ${default}]: " input
+        echo
+    else
+        read -p "${prompt} [default: ${default}]: " input
+    fi
+    
+    if [ -z "$input" ]; then
+        input="$default"
+    fi
+    eval "$var_name='$input'"
+}
+
+# Function to prompt for required input
+prompt_required() {
+    local prompt="$1"
+    local var_name="$2"
+    local is_secret="${3:-false}"
+    local input=""
+    
+    while [ -z "$input" ]; do
+        if [ "$is_secret" = "true" ]; then
+            read -sp "${prompt}: " input
+            echo
+        else
+            read -p "${prompt}: " input
+        fi
+        if [ -z "$input" ]; then
+            print_error "This field is required. Please enter a value."
+        fi
+    done
+    eval "$var_name='$input'"
+}
+
+# Check if .env already exists
+if [ -f "$ENV_FILE" ]; then
+    print_warning ".env file already exists!"
+    read -p "Do you want to overwrite it? (y/N): " overwrite
+    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+        print_info "Setup cancelled. Existing .env file preserved."
+        exit 0
+    fi
+    print_info "Backing up existing .env to .env.backup"
+    cp "$ENV_FILE" "${ENV_FILE}.backup"
+fi
+
+print_info "Starting Home Plex Entertainment Stack setup..."
+echo
+
+# ============================================================================
+# System Configuration
+# ============================================================================
+print_info "=== System Configuration ==="
+prompt_with_default "Timezone" "America/New_York" "TZ"
+prompt_with_default "User ID (PUID)" "1000" "PUID"
+prompt_with_default "Group ID (PGID)" "998" "PGID"
+echo
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+print_info "=== Network Configuration ==="
+prompt_with_default "Plex Network Subnet" "172.21.0.0/16" "PLEX_NETWORK_SUBNET"
+echo
+
+# ============================================================================
+# Traefik Configuration
+# ============================================================================
+print_info "=== Traefik Reverse Proxy Configuration ==="
+prompt_with_default "Traefik IP Address" "172.21.0.10" "TRAEFIK_IP"
+prompt_with_default "Traefik HTTP Port" "80" "TRAEFIK_HTTP_PORT"
+prompt_with_default "Traefik HTTPS Port" "443" "TRAEFIK_HTTPS_PORT"
+prompt_with_default "Traefik Dashboard Port" "8088" "TRAEFIK_DASHBOARD_PORT"
+prompt_with_default "Traefik Domain (FQDN)" "traefik.example.com" "TRAEFIK_DOMAIN"
+prompt_required "Traefik ACME Email (for Let's Encrypt)" "TRAEFIK_ACME_EMAIL"
+prompt_with_default "Traefik Log Level" "INFO" "TRAEFIK_LOG_LEVEL"
+prompt_with_default "Traefik Let's Encrypt Path" "/nfs/data/docker/traefik/letsencrypt" "TRAEFIK_LETSENCRYPT_PATH"
+prompt_with_default "Cloudflare DNS API Token (leave empty if not using Cloudflare)" "" "CF_DNS_API_TOKEN"
+prompt_with_default "Traefik Middleware (e.g., 'authelia@docker' or leave empty)" "" "TRAEFIK_MIDDLEWARE"
+echo
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+print_info "=== Database Configuration ==="
+prompt_with_default "PostgreSQL Username" "postgres" "POSTGRES_USER"
+prompt_required "PostgreSQL Password" "POSTGRES_PASSWORD" "true"
+prompt_with_default "Riven Database Name" "riven" "POSTGRES_DB_RIVEN"
+prompt_with_default "Zilean Database Name" "zilean" "POSTGRES_DB_ZILEAN"
+echo
+
+# ============================================================================
+# Plex Configuration
+# ============================================================================
+print_info "=== Plex Configuration ==="
+prompt_with_default "Plex URL (external)" "http://192.168.1.100:32400" "PLEX_URL"
+prompt_with_default "Plex URL (internal)" "http://192.168.1.100:32400" "PLEX_URL_INTERNAL"
+prompt_required "Plex Token" "PLEX_TOKEN" "true"
+echo
+
+# ============================================================================
+# Real-Debrid Configuration
+# ============================================================================
+print_info "=== Real-Debrid Configuration ==="
+prompt_required "Real-Debrid API Key" "REAL_DEBRID_API_KEY" "true"
+echo
+
+# ============================================================================
+# Riven Configuration
+# ============================================================================
+print_info "=== Riven Configuration ==="
+prompt_required "Riven API Key" "RIVEN_API_KEY" "true"
+prompt_with_default "Riven Frontend URL" "https://riven.example.com" "RIVEN_FRONTEND_URL"
+prompt_with_default "Riven Backend URL" "http://riven:8080" "RIVEN_BACKEND_URL"
+prompt_with_default "Zilean URL" "http://zilean:8181" "ZILEAN_URL"
+prompt_with_default "Enable Overseerr integration? (true/false)" "true" "RIVEN_CONTENT_OVERSEERR_ENABLED"
+prompt_with_default "Enable Plex Watchlist monitoring? (true/false)" "true" "RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED"
+prompt_with_default "Plex Watchlist update interval (seconds)" "60" "RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL"
+prompt_with_default "Enable Torrentio scraping? (true/false)" "false" "RIVEN_SCRAPING_TORRENTIO_ENABLED"
+prompt_with_default "Rclone symlink path" "/nfs/data/docker/storageRD/torrents/__all__" "RIVEN_SYMLINK_RCLONE_PATH"
+prompt_with_default "Plex library path" "/nfs/media/plex" "RIVEN_SYMLINK_LIBRARY_PATH"
+prompt_with_default "Riven webhook URL for Overseerr" "http://riven:8080/api/v1/webhook/overseerr" "RIVEN_WEBHOOK_OVERSEERR_URL"
+echo
+
+# ============================================================================
+# Overseerr Configuration
+# ============================================================================
+print_info "=== Overseerr Configuration ==="
+prompt_with_default "Overseerr URL" "http://overseerr:5055" "OVERSEERR_URL"
+prompt_with_default "Overseerr API Key (leave empty if not configured)" "" "OVERSEERR_API_KEY"
+echo
+
+# ============================================================================
+# Domain Configuration
+# ============================================================================
+print_info "=== Domain Configuration (FQDN and Local) ==="
+prompt_with_default "Zurg Domain (FQDN)" "zurg.example.com" "ZURG_DOMAIN"
+prompt_with_default "Zurg Local Domain" "zurg.local" "ZURG_LOCAL_DOMAIN"
+prompt_with_default "Zurger Domain (FQDN)" "zurger.example.com" "ZURGER_DOMAIN"
+prompt_with_default "Zurger Local Domain" "zurger.local" "ZURGER_LOCAL_DOMAIN"
+prompt_with_default "Zilean Domain (FQDN)" "zilean.example.com" "ZILEAN_DOMAIN"
+prompt_with_default "Zilean Local Domain" "zilean.local" "ZILEAN_LOCAL_DOMAIN"
+prompt_with_default "Overseerr Domain (FQDN)" "over.example.com" "OVERSEERR_DOMAIN"
+prompt_with_default "Overseerr Local Domain" "over.local" "OVERSEERR_LOCAL_DOMAIN"
+prompt_with_default "Riven Domain (FQDN)" "riven.example.com" "RIVEN_DOMAIN"
+prompt_with_default "Riven Local Domain" "riven.local" "RIVEN_LOCAL_DOMAIN"
+echo
+
+# ============================================================================
+# Static IP Configuration
+# ============================================================================
+print_info "=== Static IP Configuration (in plex_network subnet) ==="
+prompt_with_default "Zurg IP" "172.21.0.25" "ZURG_IP"
+prompt_with_default "Rclone IP" "172.21.0.43" "RCLONE_IP"
+prompt_with_default "Zurger IP" "172.21.0.26" "ZURGER_IP"
+prompt_with_default "Riven DB IP" "172.21.0.32" "RIVEN_DB_IP"
+prompt_with_default "Zilean IP" "172.21.0.28" "ZILEAN_IP"
+prompt_with_default "Overseerr IP" "172.21.0.29" "OVERSEERR_IP"
+prompt_with_default "Riven IP" "172.21.0.31" "RIVEN_IP"
+prompt_with_default "Riven Frontend IP" "172.21.0.30" "RIVEN_FRONTEND_IP"
+prompt_with_default "FlareSolverr IP" "172.21.0.20" "FLARESOLVERR_IP"
+echo
+
+# ============================================================================
+# Path Configuration
+# ============================================================================
+print_info "=== Path Configuration ==="
+prompt_with_default "Zurg Config Path" "/nfs/data/docker/zurg/config.yml" "ZURG_CONFIG_PATH"
+prompt_with_default "Zurg Data Path" "/nfs/data/docker/zurg/" "ZURG_DATA_PATH"
+prompt_with_default "Zurger Build Context" "/nfs/data/docker/zurger" "ZURGER_BUILD_CONTEXT"
+prompt_with_default "Zurger Templates Path" "/nfs/data/docker/zurger/templates" "ZURGER_TEMPLATES_PATH"
+prompt_with_default "Zurger Config Path" "/nfs/data/docker/zurger/config.ini" "ZURGER_CONFIG_PATH"
+prompt_with_default "Zurger Trigger Path" "/nfs/media/zurger/" "ZURGER_TRIGGER_PATH"
+prompt_with_default "Rclone Config Path" "/nfs/data/docker/rclone/rclone.conf" "RCLONE_CONFIG_PATH"
+prompt_with_default "Storage Torrents Path" "/nfs/data/docker/storageRD/torrents" "STORAGE_TORRENTS_PATH"
+prompt_with_default "Storage RD Path" "/nfs/data/docker/storageRD" "STORAGE_RD_PATH"
+prompt_with_default "Plex Library Path" "/nfs/media/plex" "PLEX_LIBRARY_PATH"
+prompt_with_default "Zilean Data Path" "/nfs/data/docker/zilean" "ZILEAN_DATA_PATH"
+prompt_with_default "Overseerr Config Path" "/nfs/data/docker/overseerr/config" "OVERSEERR_CONFIG_PATH"
+prompt_with_default "Riven Data Path" "/nfs/data/docker/riven/data" "RIVEN_DATA_PATH"
+prompt_with_default "Riven DB Path" "/nfs/data/docker/riven-db" "RIVEN_DB_PATH"
+echo
+
+# ============================================================================
+# FlareSolverr Configuration (Optional)
+# ============================================================================
+print_info "=== FlareSolverr Configuration (Optional) ==="
+prompt_with_default "Log Level" "info" "LOG_LEVEL"
+prompt_with_default "Log HTML (true/false)" "false" "LOG_HTML"
+prompt_with_default "Captcha Solver (leave empty if not using)" "" "CAPTCHA_SOLVER"
+echo
+
+# ============================================================================
+# Generate .env file
+# ============================================================================
+print_info "Generating .env file..."
+
+cat > "$ENV_FILE" << EOF
+# ============================================================================
+# Home Plex Entertainment Stack - Environment Variables
+# ============================================================================
+# Generated by setup.sh on $(date)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# System Configuration
+# ----------------------------------------------------------------------------
+TZ=${TZ}
+PUID=${PUID}
+PGID=${PGID}
+
+# ----------------------------------------------------------------------------
+# Network Configuration
+# ----------------------------------------------------------------------------
+PLEX_NETWORK_SUBNET=${PLEX_NETWORK_SUBNET}
+
+# ----------------------------------------------------------------------------
+# Traefik Configuration
+# ----------------------------------------------------------------------------
+TRAEFIK_IP=${TRAEFIK_IP}
+TRAEFIK_HTTP_PORT=${TRAEFIK_HTTP_PORT}
+TRAEFIK_HTTPS_PORT=${TRAEFIK_HTTPS_PORT}
+TRAEFIK_DASHBOARD_PORT=${TRAEFIK_DASHBOARD_PORT}
+TRAEFIK_DOMAIN=${TRAEFIK_DOMAIN}
+TRAEFIK_ACME_EMAIL=${TRAEFIK_ACME_EMAIL}
+TRAEFIK_LOG_LEVEL=${TRAEFIK_LOG_LEVEL}
+TRAEFIK_LETSENCRYPT_PATH=${TRAEFIK_LETSENCRYPT_PATH}
+TRAEFIK_MIDDLEWARE=${TRAEFIK_MIDDLEWARE}
+CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+
+# ----------------------------------------------------------------------------
+# Database Configuration
+# ----------------------------------------------------------------------------
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POSTGRES_DB_RIVEN=${POSTGRES_DB_RIVEN}
+POSTGRES_DB_ZILEAN=${POSTGRES_DB_ZILEAN}
+
+# ----------------------------------------------------------------------------
+# Plex Configuration
+# ----------------------------------------------------------------------------
+PLEX_URL=${PLEX_URL}
+PLEX_URL_INTERNAL=${PLEX_URL_INTERNAL}
+PLEX_TOKEN=${PLEX_TOKEN}
+
+# ----------------------------------------------------------------------------
+# Real-Debrid Configuration
+# ----------------------------------------------------------------------------
+REAL_DEBRID_API_KEY=${REAL_DEBRID_API_KEY}
+
+# ----------------------------------------------------------------------------
+# Riven Configuration
+# ----------------------------------------------------------------------------
+RIVEN_API_KEY=${RIVEN_API_KEY}
+RIVEN_FRONTEND_URL=${RIVEN_FRONTEND_URL}
+RIVEN_BACKEND_URL=${RIVEN_BACKEND_URL}
+ZILEAN_URL=${ZILEAN_URL}
+RIVEN_CONTENT_OVERSEERR_ENABLED=${RIVEN_CONTENT_OVERSEERR_ENABLED}
+RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED=${RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED}
+RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL=${RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL}
+RIVEN_SCRAPING_TORRENTIO_ENABLED=${RIVEN_SCRAPING_TORRENTIO_ENABLED}
+RIVEN_SYMLINK_RCLONE_PATH=${RIVEN_SYMLINK_RCLONE_PATH}
+RIVEN_SYMLINK_LIBRARY_PATH=${RIVEN_SYMLINK_LIBRARY_PATH}
+RIVEN_WEBHOOK_OVERSEERR_URL=${RIVEN_WEBHOOK_OVERSEERR_URL}
+
+# ----------------------------------------------------------------------------
+# Overseerr Configuration
+# ----------------------------------------------------------------------------
+OVERSEERR_URL=${OVERSEERR_URL}
+OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+
+# ----------------------------------------------------------------------------
+# Domain Configuration (FQDN and Local)
+# ----------------------------------------------------------------------------
+ZURG_DOMAIN=${ZURG_DOMAIN}
+ZURG_LOCAL_DOMAIN=${ZURG_LOCAL_DOMAIN}
+ZURGER_DOMAIN=${ZURGER_DOMAIN}
+ZURGER_LOCAL_DOMAIN=${ZURGER_LOCAL_DOMAIN}
+ZILEAN_DOMAIN=${ZILEAN_DOMAIN}
+ZILEAN_LOCAL_DOMAIN=${ZILEAN_LOCAL_DOMAIN}
+OVERSEERR_DOMAIN=${OVERSEERR_DOMAIN}
+OVERSEERR_LOCAL_DOMAIN=${OVERSEERR_LOCAL_DOMAIN}
+RIVEN_DOMAIN=${RIVEN_DOMAIN}
+RIVEN_LOCAL_DOMAIN=${RIVEN_LOCAL_DOMAIN}
+
+# ----------------------------------------------------------------------------
+# Static IP Configuration (in plex_network subnet)
+# ----------------------------------------------------------------------------
+ZURG_IP=${ZURG_IP}
+RCLONE_IP=${RCLONE_IP}
+ZURGER_IP=${ZURGER_IP}
+RIVEN_DB_IP=${RIVEN_DB_IP}
+ZILEAN_IP=${ZILEAN_IP}
+OVERSEERR_IP=${OVERSEERR_IP}
+RIVEN_IP=${RIVEN_IP}
+RIVEN_FRONTEND_IP=${RIVEN_FRONTEND_IP}
+FLARESOLVERR_IP=${FLARESOLVERR_IP}
+
+# ----------------------------------------------------------------------------
+# Path Configuration
+# ----------------------------------------------------------------------------
+ZURG_CONFIG_PATH=${ZURG_CONFIG_PATH}
+ZURG_DATA_PATH=${ZURG_DATA_PATH}
+ZURGER_BUILD_CONTEXT=${ZURGER_BUILD_CONTEXT}
+ZURGER_TEMPLATES_PATH=${ZURGER_TEMPLATES_PATH}
+ZURGER_CONFIG_PATH=${ZURGER_CONFIG_PATH}
+ZURGER_TRIGGER_PATH=${ZURGER_TRIGGER_PATH}
+RCLONE_CONFIG_PATH=${RCLONE_CONFIG_PATH}
+STORAGE_TORRENTS_PATH=${STORAGE_TORRENTS_PATH}
+STORAGE_RD_PATH=${STORAGE_RD_PATH}
+PLEX_LIBRARY_PATH=${PLEX_LIBRARY_PATH}
+ZILEAN_DATA_PATH=${ZILEAN_DATA_PATH}
+OVERSEERR_CONFIG_PATH=${OVERSEERR_CONFIG_PATH}
+RIVEN_DATA_PATH=${RIVEN_DATA_PATH}
+RIVEN_DB_PATH=${RIVEN_DB_PATH}
+
+# ----------------------------------------------------------------------------
+# FlareSolverr Configuration (Optional)
+# ----------------------------------------------------------------------------
+LOG_LEVEL=${LOG_LEVEL}
+LOG_HTML=${LOG_HTML}
+CAPTCHA_SOLVER=${CAPTCHA_SOLVER}
+EOF
+
+print_success ".env file generated successfully!"
+echo
+
+# ============================================================================
+# Verify paths exist
+# ============================================================================
+print_info "Verifying paths..."
+MISSING_PATHS=()
+
+check_path() {
+    local path="$1"
+    local name="$2"
+    if [ ! -e "$path" ]; then
+        MISSING_PATHS+=("$name: $path")
+    fi
+}
+
+check_path "$ZURG_CONFIG_PATH" "Zurg Config"
+check_path "$ZURG_DATA_PATH" "Zurg Data"
+check_path "$ZURGER_BUILD_CONTEXT" "Zurger Build Context"
+check_path "$ZURGER_TEMPLATES_PATH" "Zurger Templates"
+check_path "$ZURGER_CONFIG_PATH" "Zurger Config"
+check_path "$RCLONE_CONFIG_PATH" "Rclone Config"
+check_path "$PLEX_LIBRARY_PATH" "Plex Library"
+check_path "$TRAEFIK_LETSENCRYPT_PATH" "Traefik Let's Encrypt"
+
+if [ ${#MISSING_PATHS[@]} -gt 0 ]; then
+    print_warning "The following paths do not exist:"
+    for path in "${MISSING_PATHS[@]}"; do
+        echo "  - $path"
+    done
+    echo
+    print_info "You may need to create these paths or update the configuration."
+else
+    print_success "All paths verified!"
+fi
+echo
+
+# ============================================================================
+# Network check
+# ============================================================================
+print_info "Checking Docker network..."
+NETWORK_NAME="plex_network"
+if docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
+    print_warning "Docker network '$NETWORK_NAME' already exists"
+    read -p "Do you want to remove and recreate it? (y/N): " recreate_network
+    if [[ "$recreate_network" =~ ^[Yy]$ ]]; then
+        docker network rm "$NETWORK_NAME" 2>/dev/null || true
+        docker network create --subnet="${PLEX_NETWORK_SUBNET}" "$NETWORK_NAME"
+        print_success "Docker network '$NETWORK_NAME' recreated"
+    else
+        print_info "Using existing network '$NETWORK_NAME'"
+    fi
+else
+    print_info "Creating Docker network '$NETWORK_NAME'..."
+    docker network create --subnet="${PLEX_NETWORK_SUBNET}" "$NETWORK_NAME"
+    print_success "Docker network '$NETWORK_NAME' created"
+fi
+echo
+
+# ============================================================================
+# Summary
+# ============================================================================
+print_success "Setup completed successfully!"
+echo
+print_info "Next steps:"
+echo "  1. Review the generated .env file: ${ENV_FILE}"
+echo "  2. Make any necessary adjustments to paths or configuration"
+echo "  3. Start the services: docker compose up -d"
+echo "  4. Check logs: docker compose logs -f"
+echo "  5. Configure Overseerr webhook:"
+echo "     - Login to Overseerr"
+echo "     - Go to Settings → Notifications → Webhooks"
+echo "     - Add webhook: ${RIVEN_WEBHOOK_OVERSEERR_URL}"
+echo "     - Set Auth Header: Bearer ${RIVEN_API_KEY}"
+echo "     - Enable events: Media Requested, Media Available"
+echo "  6. Verify Plex Watchlist monitoring is enabled in Riven settings"
+echo
+print_info "Configuration file location: ${ENV_FILE}"
+print_info "Integration guide: ${SCRIPT_DIR}/integration-config.md"
+print_warning "Keep your .env file secure! It contains sensitive information."
+

@@ -1,0 +1,14 @@
+# Environment file with secrets
+.env
+.env.backup
+
+# Docker volumes and data
+data/
+*.log
+
+# Temporary files
+README.html
+/tmp/
+*.pid
+*.log
+

@@ -1,0 +1,410 @@
+networks:
+  plex_network:
+    driver: bridge
+    ipam:
+      config:
+      - subnet: ${PLEX_NETWORK_SUBNET}
+
+services:
+  # ============================================================================
+  # Traefik - Reverse Proxy
+  # ============================================================================
+  traefik:
+    image: traefik:latest
+    container_name: plex-traefik
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - --api.insecure=true
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=plex_network
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.cloudflare.acme.dnschallenge=true
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.cloudflare.acme.email=${TRAEFIK_ACME_EMAIL}
+      - --certificatesresolvers.cloudflare.acme.storage=/letsencrypt/acme.json
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --log.level=${TRAEFIK_LOG_LEVEL}
+    ports:
+      - "${TRAEFIK_HTTP_PORT}:80"
+      - "${TRAEFIK_HTTPS_PORT}:443"
+      - "${TRAEFIK_DASHBOARD_PORT}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${TRAEFIK_LETSENCRYPT_PATH}:/letsencrypt
+    environment:
+      - CF_DNS_API_TOKEN=${CF_DNS_API_TOKEN}
+    networks:
+      plex_network:
+        ipv4_address: ${TRAEFIK_IP}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)
+      - traefik.http.routers.traefik.entrypoints=websecure
+      - traefik.http.routers.traefik.tls.certresolver=cloudflare
+      - traefik.http.services.traefik.loadbalancer.server.port=8080
+      - homepage.name=Traefik
+      - homepage.description=Reverse Proxy & Load Balancer
+      - homepage.icon=traefik
+      - homepage.group=System
+      - homepage.url=${TRAEFIK_DOMAIN}
+      - wud.watch=true
+
+  # ============================================================================
+  # Real-Debrid Media Manager - Manages Real-Debrid torrents and content
+  # ============================================================================
+  zurg:
+    image: ghcr.io/debridmediamanager/zurg-testing:latest
+    container_name: zurg
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+      PUID: ${PUID}
+      PGID: ${PGID}
+      LOG_LEVEL: info
+    networks:
+      plex_network:
+        ipv4_address: ${ZURG_IP}
+    ports:
+      - 9999:9999
+    volumes:
+      - ${ZURG_CONFIG_PATH}:/app/config.yml
+      - ${ZURG_DATA_PATH}:/app/data
+      - ${ZURGER_TRIGGER_PATH}:/nfs/media/zurger/
+      - /nfs:/nfs
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.zurg.rule=(Host(`${ZURG_DOMAIN}`) || Host(`${ZURG_LOCAL_DOMAIN}`))
+      - traefik.http.services.zurg.loadbalancer.server.port=8000
+      - traefik.http.routers.zurg.entrypoints=websecure
+      - traefik.http.routers.zurg.tls.certresolver=cloudflare
+      - traefik.http.routers.zurg.middlewares=${TRAEFIK_MIDDLEWARE}
+      - homepage.name=Zurg
+      - homepage.description=Media Management
+      - homepage.icon=zurg
+      - homepage.group=Media
+      - homepage.url=${ZURG_DOMAIN}
+      - wud.watch=true
+
+  # ============================================================================
+  # Rclone - Mounts Zurg WebDAV as filesystem
+  # ============================================================================
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone
+    restart: unless-stopped
+    privileged: true
+    env_file:
+      - .env
+    networks:
+      plex_network:
+        ipv4_address: ${RCLONE_IP}
+    volumes:
+      - ${RCLONE_CONFIG_PATH}:/config/rclone/rclone.conf
+      - ${STORAGE_TORRENTS_PATH}:/data:rshared
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    depends_on:
+      - zurg
+    command: 'mount zurg: /data --uid ${PUID} --gid ${PGID} --allow-other --allow-non-empty --dir-cache-time 10s --vfs-cache-mode off --buffer-size 0M --vfs-read-chunk-size 128M --vfs-read-chunk-size-limit 2G --max-read-ahead 2M'
+    labels:
+      - traefik.enable=false
+
+  # ============================================================================
+  # Zurger - Media Organization Interface
+  # ============================================================================
+  zurger:
+    build:
+      context: ${ZURGER_BUILD_CONTEXT}
+    container_name: zurger
+    env_file:
+      - .env
+    networks:
+      plex_network:
+        ipv4_address: ${ZURGER_IP}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.zurger.rule=(Host(`${ZURGER_DOMAIN}`) || Host(`${ZURGER_LOCAL_DOMAIN}`))
+      - traefik.http.services.zurger.loadbalancer.server.port=8000
+      - traefik.http.routers.zurger.entrypoints=websecure
+      - traefik.http.routers.zurger.tls.certresolver=cloudflare
+      - traefik.http.routers.zurger.middlewares=${TRAEFIK_MIDDLEWARE}
+      - homepage.name=Zurger
+      - homepage.description=Media Management Interface
+      - homepage.icon=zurger
+      - homepage.group=Media
+      - homepage.url=${ZURGER_DOMAIN}
+      - wud.watch=true
+    volumes:
+      - ${STORAGE_TORRENTS_PATH}:/nfs/data/docker/storageRD/torrents:ro
+      - ${PLEX_LIBRARY_PATH}:/nfs/media/plex
+      - ${ZURGER_TEMPLATES_PATH}:/app/templates
+      - ${ZURGER_CONFIG_PATH}:/app/config.ini:ro
+    environment:
+      - TZ=UTC
+      - PLEX_URL=${PLEX_URL}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8000/
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    ports:
+      - 6464:8000
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  # ============================================================================
+  # PostgreSQL Database - Shared by Riven and Zilean
+  # ============================================================================
+  riven_postgres:
+    image: postgres:16.3-alpine3.20
+    container_name: riven-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB_RIVEN}
+      TZ: ${TZ}
+      PUID: ${PUID}
+      PGID: ${PGID}
+    networks:
+      plex_network:
+        ipv4_address: ${RIVEN_DB_IP}
+    volumes:
+      - ${RIVEN_DB_PATH}:/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Zilean - Torrent Scraping Service
+  # ============================================================================
+  zilean:
+    image: ipromknight/zilean:latest
+    container_name: zilean
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 8181:8181
+    volumes:
+      - ${ZILEAN_DATA_PATH}:/app/data
+    environment:
+      TZ: ${TZ}
+      PUID: ${PUID}
+      PGID: ${PGID}
+      Zilean__Database__ConnectionString: Host=riven-db;Port=5432;Database=${POSTGRES_DB_ZILEAN};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+    networks:
+      plex_network:
+        ipv4_address: ${ZILEAN_IP}
+    healthcheck:
+      test: curl --connect-timeout 10 --silent --show-error --fail http://localhost:8181/healthchecks/ping
+      timeout: 60s
+      interval: 30s
+      retries: 10
+    depends_on:
+      riven_postgres:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.zilean.rule=(Host(`${ZILEAN_DOMAIN}`) || Host(`${ZILEAN_LOCAL_DOMAIN}`))
+      - traefik.http.services.zilean.loadbalancer.server.port=8181
+      - traefik.http.routers.zilean.entrypoints=websecure
+      - traefik.http.routers.zilean.tls.certresolver=cloudflare
+      - traefik.http.routers.zilean.middlewares=${TRAEFIK_MIDDLEWARE}
+      - homepage.name=Zilean
+      - homepage.description=Media Scraping Service
+      - homepage.icon=zilean
+      - homepage.group=Media
+      - homepage.url=${ZILEAN_DOMAIN}
+      - wud.watch=true
+
+  # ============================================================================
+  # Overseerr - Media Request Management
+  # ============================================================================
+  overseerr:
+    image: lscr.io/linuxserver/overseerr:latest
+    container_name: overseerr
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 5056:5055
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    networks:
+      plex_network:
+        ipv4_address: ${OVERSEERR_IP}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.overseerr.rule=(Host(`${OVERSEERR_DOMAIN}`) || Host(`${OVERSEERR_LOCAL_DOMAIN}`))
+      - traefik.http.services.overseerr.loadbalancer.server.port=5055
+      - traefik.http.routers.overseerr.entrypoints=websecure
+      - traefik.http.routers.overseerr.tls.certresolver=cloudflare
+      - traefik.http.routers.overseerr.middlewares=${TRAEFIK_MIDDLEWARE}
+      - homepage.name=Overseerr
+      - homepage.description=Media Request Management
+      - homepage.icon=overseerr
+      - homepage.group=Media
+      - homepage.url=${OVERSEERR_DOMAIN}
+      - wud.watch=true
+    volumes:
+      - ${OVERSEERR_CONFIG_PATH}:/config
+      - ${STORAGE_RD_PATH}:/nfs/data/docker/storageRD/
+
+  # ============================================================================
+  # Riven - Automation Orchestrator (Backend)
+  # ============================================================================
+  riven:
+    image: spoked/riven:latest
+    container_name: riven
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - 8085:8080
+    tty: true
+    networks:
+      plex_network:
+        ipv4_address: ${RIVEN_IP}
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - RIVEN_API_KEY=${RIVEN_API_KEY}
+      - RIVEN_REPAIR_SYMLINKS=true
+      - RIVEN_SYMLINK_RCLONE_PATH=${RIVEN_SYMLINK_RCLONE_PATH}
+      - RIVEN_SYMLINK_LIBRARY_PATH=${RIVEN_SYMLINK_LIBRARY_PATH}
+      - RIVEN_DATABASE_HOST=postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@riven-db/${POSTGRES_DB_RIVEN}
+      - RIVEN_DOWNLOADERS_REAL_DEBRID_ENABLED=true
+      - RIVEN_DOWNLOADERS_REAL_DEBRID_API_KEY=${REAL_DEBRID_API_KEY}
+      - RIVEN_UPDATERS_PLEX_ENABLED=true
+      - RIVEN_UPDATERS_PLEX_URL=${PLEX_URL_INTERNAL}
+      - RIVEN_UPDATERS_PLEX_TOKEN=${PLEX_TOKEN}
+      - RIVEN_CONTENT_OVERSEERR_ENABLED=${RIVEN_CONTENT_OVERSEERR_ENABLED}
+      - RIVEN_CONTENT_OVERSEERR_URL=${OVERSEERR_URL}
+      - RIVEN_CONTENT_OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+      - RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED=${RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED}
+      - RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL=${RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL}
+      - RIVEN_SCRAPING_TORRENTIO_ENABLED=${RIVEN_SCRAPING_TORRENTIO_ENABLED}
+      - RIVEN_SCRAPING_ZILEAN_ENABLED=true
+      - RIVEN_SCRAPING_ZILEAN_URL=${ZILEAN_URL}
+      - RIVEN_WEBHOOK_OVERSEERR_URL=${RIVEN_WEBHOOK_OVERSEERR_URL}
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - --spider
+        - http://localhost:8080
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - ${RIVEN_DATA_PATH}:/riven/data
+      - ${STORAGE_RD_PATH}:/nfs/data/docker/storageRD
+      - ${PLEX_LIBRARY_PATH}:/nfs/media/plex
+    depends_on:
+      riven_postgres:
+        condition: service_healthy
+
+  # ============================================================================
+  # Riven Frontend - Web UI for Riven
+  # ============================================================================
+  riven-frontend:
+    image: spoked/riven-frontend:latest
+    container_name: riven-frontend
+    env_file:
+      - .env
+    networks:
+      plex_network:
+        ipv4_address: ${RIVEN_FRONTEND_IP}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.riven-frontend.rule=(Host(`${RIVEN_DOMAIN}`) || Host(`${RIVEN_LOCAL_DOMAIN}`))
+      - traefik.http.services.riven-frontend.loadbalancer.server.port=3000
+      - traefik.http.routers.riven-frontend.entrypoints=websecure
+      - traefik.http.routers.riven-frontend.tls.certresolver=cloudflare
+      - traefik.http.routers.riven-frontend.middlewares=${TRAEFIK_MIDDLEWARE}
+      - homepage.name=Riven
+      - homepage.description=Media Management Interface
+      - homepage.icon=riven
+      - homepage.group=Media
+      - homepage.url=${RIVEN_DOMAIN}
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    tty: true
+    environment:
+      - ORIGIN=${RIVEN_FRONTEND_URL}
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - BACKEND_URL=${RIVEN_BACKEND_URL}
+      - DIALECT=postgres
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@riven-db/${POSTGRES_DB_RIVEN}
+      - TZ=${TZ}
+      - RIVEN_WEBHOOK_OVERSEERR_URL=${RIVEN_WEBHOOK_OVERSEERR_URL}
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - --spider
+        - http://127.0.0.1:3000
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================================================
+  # FlareSolverr - Cloudflare bypass service (optional, used by some scrapers)
+  # ============================================================================
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    env_file:
+      - .env
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - LOG_HTML=${LOG_HTML}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER}
+    networks:
+      plex_network:
+        ipv4_address: ${FLARESOLVERR_IP}
+    restart: unless-stopped
