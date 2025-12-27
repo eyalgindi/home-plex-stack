@@ -43,7 +43,7 @@ If you prefer to push manually:
 cd /nfs/data/docker/home_plex
 
 # Configure remote with token
-GH_TOKEN="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"
+GH_TOKEN="YOUR_GITHUB_TOKEN_HERE"
 git remote add origin "https://${GH_TOKEN}@github.com/eyalgindi/home-plex-stack.git"
 
 # Push

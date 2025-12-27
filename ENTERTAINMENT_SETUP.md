@@ -47,12 +47,12 @@ This document explains the complete entertainment/media management stack, includ
 **Container**: `zurg`  
 **IP**: 172.20.0.25  
 **Port**: 9999 (internal), 8000 (web UI)  
-**URL**: https://zurg.gindi.us
+**URL**: https://zurg.example.com
 
 **Purpose**: Manages Real-Debrid torrents and provides WebDAV/HTTP access to downloaded content.
 
 **Configuration** (`/nfs/data/docker/zurg/config.yml`):
-- **Token**: Real-Debrid API token (WHQMY3T43SX6BR5CTLS3AO2WWELYR2SFILKO7XG6FH7NBMZSQD3Q)
+- **Token**: Real-Debrid API token (configured in config.yml - use CHANGE_ME in env.example)
 - **Directories**: Organizes content into `anime`, `shows`, and `movies` groups
 - **Auto-repair**: Enabled to fix broken downloads
 - **Library update trigger**: Executes `/nfs/media/zurger/trigger.sh` when library updates
@@ -75,19 +75,19 @@ This document explains the complete entertainment/media management stack, includ
 **Container**: `zurger`  
 **IP**: 172.20.0.26  
 **Port**: 8000 (internal), 6464 (host)  
-**URL**: https://zurger.gindi.us
+**URL**: https://zurger.example.com
 
 **Purpose**: Custom web interface for organizing and managing media files from Real-Debrid downloads.
 
 **Configuration** (`/nfs/data/docker/zurger/config.ini`):
-- **Plex URL**: http://192.168.1.100:32400
-- **Plex Token**: Ra_JTMsmxiTcSuKyXiNj
-- **TMDB API Key**: adc28607024836b4a27a03e0cc7f2b61
+- **Plex URL**: http://192.168.1.100:32400 (example - configure in .env)
+- **Plex Token**: CHANGE_ME (configure in .env)
+- **TMDB API Key**: CHANGE_ME (configure in config.ini)
 - **Media Directories**:
   - Shows: `/nfs/media/plex/shows`
   - Movies: `/nfs/media/plex/movies`
   - Torrents: `/nfs/data/docker/storageRD/torrents/`
-- **Trigger URL**: http://192.168.1.100:6464/scan/all
+- **Trigger URL**: http://zurger:8000/scan/all (internal) or http://192.168.1.100:6464/scan/all (host)
 
 **Key Features**:
 - Reads torrents from rclone mount
@@ -119,13 +119,13 @@ This document explains the complete entertainment/media management stack, includ
 ```ini
 [zurg]
 type = webdav
-url = http://192.168.1.100:9999/dav
+url = http://zurg:9999/dav
 vendor = other
 pacer_min_sleep = 0
 
 [zurghttp]
 type = http
-url = http://192.168.1.100:9999/http
+url = http://zurg:9999/http
 ```
 
 **Mount Command**:
@@ -154,9 +154,9 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 
 ### 4. **Plex** (Media Server)
 **Location**: Host machine (not in Docker)  
-**IP**: 192.168.1.100  
+**IP**: 192.168.1.100 (example - configure in .env)  
 **Port**: 32400  
-**Server Name**: GindiPlex
+**Server Name**: YourPlexServer (example)
 
 **Purpose**: Media server that serves content to clients.
 
@@ -165,10 +165,10 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 - TV Shows: `/nfs/media/plex/shows`
 
 **Configuration**:
-- Machine ID: `72c8751c528e116213349cb191a6ec378e4853de`
-- Multiple tokens used by different services:
-  - Zurger: `Ra_JTMsmxiTcSuKyXiNj`
-  - Riven: `z-NMuEc1mMRARpswSd65`
+- Machine ID: Configured in Plex settings
+- Multiple tokens used by different services (configure in .env):
+  - Zurger: `PLEX_TOKEN` (from .env)
+  - Riven: `PLEX_TOKEN` (from .env)
   - Overseerr: Connected via OAuth
 
 **Relationships**:
@@ -182,18 +182,18 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 **Container**: `overseerr`  
 **IP**: 172.20.0.29  
 **Port**: 5055 (internal), 5056 (host)  
-**URL**: https://over.gindi.us
+**URL**: https://overseerr.example.com
 
 **Purpose**: Web interface for users to request movies and TV shows.
 
 **Configuration** (`/nfs/data/docker/overseerr/config/settings.json`):
 - **Plex Integration**:
-  - Server: GindiPlex (192.168.1.100:32400)
-  - Libraries: Movies (ID: 3), TV Shows (ID: 4)
+  - Server: YourPlexServer (configure PLEX_URL in .env)
+  - Libraries: Configure in Overseerr UI
 - **Riven Integration**:
-  - Webhook URL: http://172.20.0.31:8080/api/v1/webhook/overseerr
-  - API Key: `MTc1MzY0NjgyMDY2MDI1NWVhN2E3LTRiODUtNGM3Ni04NTNlLWEyZDBhNWM5YzQ4OA==`
-  - Auth Header: `Bearer 7fHANjt9jZw4AjQBvnK9cLKqlo6OCl75`
+  - Webhook URL: http://riven:8080/api/v1/webhook/overseerr
+  - API Key: Configure `OVERSEERR_API_KEY` in .env
+  - Auth Header: `Bearer ${RIVEN_API_KEY}` (from .env)
 - **Radarr/Sonarr**: Currently empty arrays (not configured)
 
 **Key Features**:
@@ -213,7 +213,7 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 **Container**: `riven`  
 **IP**: 172.20.0.31  
 **Port**: 8080 (internal), 8085 (host)  
-**URL**: https://riven.gindi.us (via frontend)
+**URL**: https://riven.example.com (via frontend)
 
 **Purpose**: Main automation service that coordinates downloads, scraping, and library updates.
 
@@ -222,13 +222,13 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 **Content Sources**:
 - **Overseerr**: Enabled
   - URL: http://overseerr:5055
-  - API Key: `MTc1MzY0NjgyMDY2MDI1NWVhN2E3LTRiODUtNGM3Ni04NTNlLWEyZDBhNWM5YzQ4OA==`
+  - API Key: Configure `OVERSEERR_API_KEY` in .env
   - Update interval: 10 seconds
   - Uses webhooks for real-time updates
 
 **Downloaders**:
 - **Real-Debrid**: Enabled
-  - API Key: `WHQMY3T43SX6BR5CTLS3AO2WWELYR2SFILKO7XG6FH7NBMZSQD3Q`
+  - API Key: Configure `REAL_DEBRID_API_KEY` in .env
   - Movie size: 700MB minimum
   - Episode size: 100MB minimum
 
@@ -237,12 +237,12 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
   - URL: http://zilean:8181
   - Timeout: 30 seconds
   - Rate limited: Yes
-- **Torrentio**: Enabled
+- **Torrentio**: Enabled (optional)
   - URL: https://torrentio.strem.fun
   - Filter: Quality filtering (480p, scr, cam, unknown excluded)
-- **Prowlarr**: Enabled
+- **Prowlarr**: Enabled (optional)
   - URL: http://prowlarr:9696
-  - API Key: `d113c2109c8c4a0482f6910a966b7dd9`
+  - API Key: Configure in Riven settings
 
 **Symlink Management**:
 - **Rclone Path**: `/nfs/data/docker/storageRD/torrents/__all__`
@@ -251,8 +251,8 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 
 **Plex Integration**:
 - **Enabled**: Yes
-- **URL**: http://192.168.1.100:32400
-- **Token**: `z-NMuEc1mMRARpswSd65`
+- **URL**: Configure `PLEX_URL` in .env
+- **Token**: Configure `PLEX_TOKEN` in .env
 - **Update Interval**: 120 seconds
 
 **Database**: PostgreSQL (riven-db container)
@@ -270,7 +270,7 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 **Container**: `zilean`  
 **IP**: 172.20.0.28  
 **Port**: 8181  
-**URL**: https://zilean.gindi.us
+**URL**: https://zilean.example.com
 
 **Purpose**: Scrapes and indexes torrents from various sources, provides API for Riven.
 
@@ -303,7 +303,7 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 **Container**: `riven-frontend`  
 **IP**: 172.20.0.30  
 **Port**: 3000  
-**URL**: https://riven.gindi.us
+**URL**: https://riven.example.com
 
 **Purpose**: Web interface for managing Riven.
 
@@ -339,7 +339,7 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 ### Request Flow (User → Content)
 
 1. **User Request**:
-   - User opens Overseerr (https://over.gindi.us)
+   - User opens Overseerr (configured domain)
    - Requests a movie or TV show
    - Overseerr sends webhook to Riven
 
@@ -402,21 +402,23 @@ mount zurg: /data --uid 1000 --gid 998 --allow-other --allow-non-empty \
 
 ## API Keys & Tokens
 
+All API keys and tokens should be configured in the `.env` file (see `env.example` for template):
+
 ### Real-Debrid
-- **API Token**: `WHQMY3T43SX6BR5CTLS3AO2WWELYR2SFILKO7XG6FH7NBMZSQD3Q`
+- **API Token**: Configure `REAL_DEBRID_API_KEY` in .env
   - Used by: Zurg, Riven
 
 ### Plex Tokens
-- **Zurger Token**: `Ra_JTMsmxiTcSuKyXiNj`
-- **Riven Token**: `z-NMuEc1mMRARpswSd65`
-- **Overseerr**: Uses OAuth
+- **Plex Token**: Configure `PLEX_TOKEN` in .env
+  - Used by: Zurger, Riven
+- **Overseerr**: Uses OAuth (configured in Overseerr UI)
 
 ### Service API Keys
-- **Riven API Key**: `7fHANjt9jZw4AjQBvnK9cLKqlo6OCl75`
-- **Overseerr API Key**: `MTc1MzY0NjgyMDY2MDI1NWVhN2E3LTRiODUtNGM3Ni04NTNlLWEyZDBhNWM5YzQ4OA==`
-- **Zilean API Key**: `7afb847330474afb808d552ac827e60aa28962e78a62478db723f3bebb86b57e`
-- **Prowlarr API Key**: `d113c2109c8c4a0482f6910a966b7dd9`
-- **TMDB API Key**: `adc28607024836b4a27a03e0cc7f2b61`
+- **Riven API Key**: Configure `RIVEN_API_KEY` in .env
+- **Overseerr API Key**: Configure `OVERSEERR_API_KEY` in .env (optional)
+- **Zilean API Key**: Configure in Zilean settings (if needed)
+- **Prowlarr API Key**: Configure in Riven settings (if using Prowlarr)
+- **TMDB API Key**: Configure in Zurger config.ini (if needed)
 
 ---
 
@@ -433,7 +435,7 @@ All services run on the `home_lab` network (172.20.0.0/16):
 - **Riven DB**: 172.20.0.32
 - **Rclone**: 172.20.0.43
 
-**Plex** runs on host: 192.168.1.100:32400
+**Plex** runs on host: Configure `PLEX_URL` in .env (example: http://192.168.1.100:32400)
 
 ---
 
@@ -464,7 +466,7 @@ zurger
 
 1. **Radarr/Readarr**: Referenced in some configs (Bazarr) but not actively used in the main workflow. They may be running separately or not configured.
 
-2. **Plex**: Runs on the host machine, not in Docker. All services connect to it at 192.168.1.100:32400.
+2. **Plex**: Runs on the host machine, not in Docker. Configure the Plex URL in `.env` file (`PLEX_URL`).
 
 3. **Symlink Strategy**: Riven creates symlinks from the rclone mount to the Plex library, allowing Plex to see content without moving files.
 

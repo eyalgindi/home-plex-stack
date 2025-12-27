@@ -6,7 +6,7 @@
 # This script helps set up the GitHub remote and push the repository
 # ============================================================================
 
-set -e
+set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"

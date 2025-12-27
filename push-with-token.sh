@@ -4,14 +4,14 @@
 # Push to GitHub using provided token
 # ============================================================================
 
-set -e
+set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 GITHUB_USER="eyalgindi"
 REPO_NAME="home-plex-stack"
-GH_TOKEN="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"
+GH_TOKEN="${GH_TOKEN:-YOUR_GITHUB_TOKEN_HERE}"
 
 export GH_TOKEN
 

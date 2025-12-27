@@ -10,7 +10,7 @@ services:
   # Traefik - Reverse Proxy
   # ============================================================================
   traefik:
-    image: traefik:latest
+    image: traefik:v3.0
     container_name: plex-traefik
     restart: unless-stopped
     env_file:
@@ -43,6 +43,25 @@ services:
     networks:
       plex_network:
         ipv4_address: ${TRAEFIK_IP}
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/rawdata"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     labels:
       - traefik.enable=true
       - traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)
@@ -60,7 +79,7 @@ services:
   # Real-Debrid Media Manager - Manages Real-Debrid torrents and content
   # ============================================================================
   zurg:
-    image: ghcr.io/debridmediamanager/zurg-testing:latest
+    image: ghcr.io/debridmediamanager/zurg-testing:v1.2.3
     container_name: zurg
     restart: unless-stopped
     env_file:
@@ -80,6 +99,25 @@ services:
       - ${ZURG_DATA_PATH}:/app/data
       - ${ZURGER_TRIGGER_PATH}:/nfs/media/zurger/
       - /nfs:/nfs
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     labels:
       - traefik.enable=true
       - traefik.http.routers.zurg.rule=(Host(`${ZURG_DOMAIN}`) || Host(`${ZURG_LOCAL_DOMAIN}`))
@@ -98,7 +136,7 @@ services:
   # Rclone - Mounts Zurg WebDAV as filesystem
   # ============================================================================
   rclone:
-    image: rclone/rclone:latest
+    image: rclone/rclone:v1.66
     container_name: rclone
     restart: unless-stopped
     privileged: true
@@ -121,6 +159,25 @@ services:
     command: 'mount zurg: /data --uid ${PUID} --gid ${PGID} --allow-other --allow-non-empty --dir-cache-time 10s --vfs-cache-mode off --buffer-size 0M --vfs-read-chunk-size 128M --vfs-read-chunk-size-limit 2G --max-read-ahead 2M'
     labels:
       - traefik.enable=false
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "rclone", "rc/noop"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # ============================================================================
   # Zurger - Media Organization Interface
@@ -166,8 +223,17 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 40s
     ports:
       - 6464:8000
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
     logging:
       driver: json-file
       options:
@@ -203,12 +269,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # ============================================================================
   # Zilean - Torrent Scraping Service
   # ============================================================================
   zilean:
-    image: ipromknight/zilean:latest
+    image: ipromknight/zilean:v1.0.0
     container_name: zilean
     restart: unless-stopped
     env_file:
@@ -226,13 +306,27 @@ services:
       plex_network:
         ipv4_address: ${ZILEAN_IP}
     healthcheck:
-      test: curl --connect-timeout 10 --silent --show-error --fail http://localhost:8181/healthchecks/ping
+      test: ["CMD", "curl", "--connect-timeout", "10", "--silent", "--show-error", "--fail", "http://localhost:8181/healthchecks/ping"]
       timeout: 60s
       interval: 30s
       retries: 10
+      start_period: 60s
     depends_on:
       riven_postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
     labels:
       - traefik.enable=true
       - traefik.http.routers.zilean.rule=(Host(`${ZILEAN_DOMAIN}`) || Host(`${ZILEAN_LOCAL_DOMAIN}`))
@@ -251,7 +345,7 @@ services:
   # Overseerr - Media Request Management
   # ============================================================================
   overseerr:
-    image: lscr.io/linuxserver/overseerr:latest
+    image: lscr.io/linuxserver/overseerr:1.35.0
     container_name: overseerr
     restart: unless-stopped
     env_file:
@@ -281,12 +375,31 @@ services:
     volumes:
       - ${OVERSEERR_CONFIG_PATH}:/config
       - ${STORAGE_RD_PATH}:/nfs/data/docker/storageRD/
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5055/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # ============================================================================
   # Riven - Automation Orchestrator (Backend)
   # ============================================================================
   riven:
-    image: spoked/riven:latest
+    image: spoked/riven:v1.0.0
     container_name: riven
     restart: unless-stopped
     env_file:
@@ -339,12 +452,25 @@ services:
     depends_on:
       riven_postgres:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # ============================================================================
   # Riven Frontend - Web UI for Riven
   # ============================================================================
   riven-frontend:
-    image: spoked/riven-frontend:latest
+    image: spoked/riven-frontend:v1.0.0
     container_name: riven-frontend
     env_file:
       - .env
@@ -388,12 +514,25 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
 
   # ============================================================================
   # FlareSolverr - Cloudflare bypass service (optional, used by some scrapers)
   # ============================================================================
   flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
+    image: ghcr.io/flaresolverr/flaresolverr:v1.3.0
     container_name: flaresolverr
     env_file:
       - .env
@@ -408,3 +547,22 @@ services:
       plex_network:
         ipv4_address: ${FLARESOLVERR_IP}
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8191/v1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'

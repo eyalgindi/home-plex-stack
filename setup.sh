@@ -6,7 +6,7 @@
 # This script guides you through the configuration of the entertainment stack
 # ============================================================================
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
@@ -34,6 +34,78 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# ============================================================================
+# Validation Functions
+# ============================================================================
+
+# Validate IP address
+validate_ip() {
+    local ip="$1"
+    if [[ ! "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        return 1
+    fi
+    IFS='.' read -ra ADDR <<< "$ip"
+    for i in "${ADDR[@]}"; do
+        if [[ $i -gt 255 ]]; then
+            return 1
+        fi
+    done
+    return 0
+}
+
+# Validate CIDR subnet
+validate_cidr() {
+    local cidr="$1"
+    if [[ ! "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]]; then
+        return 1
+    fi
+    local subnet=$(echo "$cidr" | cut -d'/' -f1)
+    local mask=$(echo "$cidr" | cut -d'/' -f2)
+    if ! validate_ip "$subnet"; then
+        return 1
+    fi
+    if [[ $mask -lt 8 ]] || [[ $mask -gt 30 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Validate email address
+validate_email() {
+    local email="$1"
+    if [[ ! "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Validate URL
+validate_url() {
+    local url="$1"
+    if [[ ! "$url" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?(/.*)?$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Validate domain name
+validate_domain() {
+    local domain="$1"
+    if [[ ! "$domain" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$ ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Validate port number
+validate_port() {
+    local port="$1"
+    if [[ ! "$port" =~ ^[0-9]+$ ]] || [[ $port -lt 1 ]] || [[ $port -gt 65535 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 # Function to prompt for input with default value
@@ -105,19 +177,74 @@ echo
 # Network Configuration
 # ============================================================================
 print_info "=== Network Configuration ==="
-prompt_with_default "Plex Network Subnet" "172.21.0.0/16" "PLEX_NETWORK_SUBNET"
+while true; do
+    prompt_with_default "Plex Network Subnet" "172.21.0.0/16" "PLEX_NETWORK_SUBNET"
+    if validate_cidr "$PLEX_NETWORK_SUBNET"; then
+        break
+    else
+        print_error "Invalid CIDR notation. Please use format: x.x.x.x/y (e.g., 172.21.0.0/16)"
+    fi
+done
 echo
 
 # ============================================================================
 # Traefik Configuration
 # ============================================================================
 print_info "=== Traefik Reverse Proxy Configuration ==="
-prompt_with_default "Traefik IP Address" "172.21.0.10" "TRAEFIK_IP"
-prompt_with_default "Traefik HTTP Port" "80" "TRAEFIK_HTTP_PORT"
-prompt_with_default "Traefik HTTPS Port" "443" "TRAEFIK_HTTPS_PORT"
-prompt_with_default "Traefik Dashboard Port" "8088" "TRAEFIK_DASHBOARD_PORT"
-prompt_with_default "Traefik Domain (FQDN)" "traefik.example.com" "TRAEFIK_DOMAIN"
-prompt_required "Traefik ACME Email (for Let's Encrypt)" "TRAEFIK_ACME_EMAIL"
+while true; do
+    prompt_with_default "Traefik IP Address" "172.21.0.10" "TRAEFIK_IP"
+    if validate_ip "$TRAEFIK_IP"; then
+        break
+    else
+        print_error "Invalid IP address format. Please use format: x.x.x.x"
+    fi
+done
+
+while true; do
+    prompt_with_default "Traefik HTTP Port" "80" "TRAEFIK_HTTP_PORT"
+    if validate_port "$TRAEFIK_HTTP_PORT"; then
+        break
+    else
+        print_error "Invalid port number. Please use a number between 1-65535"
+    fi
+done
+
+while true; do
+    prompt_with_default "Traefik HTTPS Port" "443" "TRAEFIK_HTTPS_PORT"
+    if validate_port "$TRAEFIK_HTTPS_PORT"; then
+        break
+    else
+        print_error "Invalid port number. Please use a number between 1-65535"
+    fi
+done
+
+while true; do
+    prompt_with_default "Traefik Dashboard Port" "8088" "TRAEFIK_DASHBOARD_PORT"
+    if validate_port "$TRAEFIK_DASHBOARD_PORT"; then
+        break
+    else
+        print_error "Invalid port number. Please use a number between 1-65535"
+    fi
+done
+
+while true; do
+    prompt_with_default "Traefik Domain (FQDN)" "traefik.example.com" "TRAEFIK_DOMAIN"
+    if validate_domain "$TRAEFIK_DOMAIN"; then
+        break
+    else
+        print_error "Invalid domain format. Please use a valid domain name"
+    fi
+done
+
+while true; do
+    prompt_required "Traefik ACME Email (for Let's Encrypt)" "TRAEFIK_ACME_EMAIL"
+    if validate_email "$TRAEFIK_ACME_EMAIL"; then
+        break
+    else
+        print_error "Invalid email format. Please use a valid email address"
+    fi
+done
+
 prompt_with_default "Traefik Log Level" "INFO" "TRAEFIK_LOG_LEVEL"
 prompt_with_default "Traefik Let's Encrypt Path" "/nfs/data/docker/traefik/letsencrypt" "TRAEFIK_LETSENCRYPT_PATH"
 prompt_with_default "Cloudflare DNS API Token (leave empty if not using Cloudflare)" "" "CF_DNS_API_TOKEN"
@@ -138,8 +265,24 @@ echo
 # Plex Configuration
 # ============================================================================
 print_info "=== Plex Configuration ==="
-prompt_with_default "Plex URL (external)" "http://192.168.1.100:32400" "PLEX_URL"
-prompt_with_default "Plex URL (internal)" "http://192.168.1.100:32400" "PLEX_URL_INTERNAL"
+while true; do
+    prompt_with_default "Plex URL (external)" "http://192.168.1.100:32400" "PLEX_URL"
+    if validate_url "$PLEX_URL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
+
+while true; do
+    prompt_with_default "Plex URL (internal)" "http://192.168.1.100:32400" "PLEX_URL_INTERNAL"
+    if validate_url "$PLEX_URL_INTERNAL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
+
 prompt_required "Plex Token" "PLEX_TOKEN" "true"
 echo
 
@@ -155,9 +298,33 @@ echo
 # ============================================================================
 print_info "=== Riven Configuration ==="
 prompt_required "Riven API Key" "RIVEN_API_KEY" "true"
-prompt_with_default "Riven Frontend URL" "https://riven.example.com" "RIVEN_FRONTEND_URL"
-prompt_with_default "Riven Backend URL" "http://riven:8080" "RIVEN_BACKEND_URL"
-prompt_with_default "Zilean URL" "http://zilean:8181" "ZILEAN_URL"
+
+while true; do
+    prompt_with_default "Riven Frontend URL" "https://riven.example.com" "RIVEN_FRONTEND_URL"
+    if validate_url "$RIVEN_FRONTEND_URL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
+
+while true; do
+    prompt_with_default "Riven Backend URL" "http://riven:8080" "RIVEN_BACKEND_URL"
+    if validate_url "$RIVEN_BACKEND_URL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
+
+while true; do
+    prompt_with_default "Zilean URL" "http://zilean:8181" "ZILEAN_URL"
+    if validate_url "$ZILEAN_URL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
 prompt_with_default "Enable Overseerr integration? (true/false)" "true" "RIVEN_CONTENT_OVERSEERR_ENABLED"
 prompt_with_default "Enable Plex Watchlist monitoring? (true/false)" "true" "RIVEN_CONTENT_PLEX_WATCHLIST_ENABLED"
 prompt_with_default "Plex Watchlist update interval (seconds)" "60" "RIVEN_CONTENT_PLEX_WATCHLIST_UPDATE_INTERVAL"
@@ -171,7 +338,14 @@ echo
 # Overseerr Configuration
 # ============================================================================
 print_info "=== Overseerr Configuration ==="
-prompt_with_default "Overseerr URL" "http://overseerr:5055" "OVERSEERR_URL"
+while true; do
+    prompt_with_default "Overseerr URL" "http://overseerr:5055" "OVERSEERR_URL"
+    if validate_url "$OVERSEERR_URL"; then
+        break
+    else
+        print_error "Invalid URL format. Please use format: http://host:port or https://host:port"
+    fi
+done
 prompt_with_default "Overseerr API Key (leave empty if not configured)" "" "OVERSEERR_API_KEY"
 echo
 
@@ -179,31 +353,81 @@ echo
 # Domain Configuration
 # ============================================================================
 print_info "=== Domain Configuration (FQDN and Local) ==="
-prompt_with_default "Zurg Domain (FQDN)" "zurg.example.com" "ZURG_DOMAIN"
-prompt_with_default "Zurg Local Domain" "zurg.local" "ZURG_LOCAL_DOMAIN"
-prompt_with_default "Zurger Domain (FQDN)" "zurger.example.com" "ZURGER_DOMAIN"
-prompt_with_default "Zurger Local Domain" "zurger.local" "ZURGER_LOCAL_DOMAIN"
-prompt_with_default "Zilean Domain (FQDN)" "zilean.example.com" "ZILEAN_DOMAIN"
-prompt_with_default "Zilean Local Domain" "zilean.local" "ZILEAN_LOCAL_DOMAIN"
-prompt_with_default "Overseerr Domain (FQDN)" "over.example.com" "OVERSEERR_DOMAIN"
-prompt_with_default "Overseerr Local Domain" "over.local" "OVERSEERR_LOCAL_DOMAIN"
-prompt_with_default "Riven Domain (FQDN)" "riven.example.com" "RIVEN_DOMAIN"
-prompt_with_default "Riven Local Domain" "riven.local" "RIVEN_LOCAL_DOMAIN"
+
+validate_domain_input() {
+    local prompt_text="$1"
+    local default_value="$2"
+    local var_name="$3"
+    while true; do
+        prompt_with_default "$prompt_text" "$default_value" "$var_name"
+        if validate_domain "${!var_name}"; then
+            break
+        else
+            print_error "Invalid domain format. Please use a valid domain name"
+        fi
+    done
+}
+
+validate_domain_input "Zurg Domain (FQDN)" "zurg.example.com" "ZURG_DOMAIN"
+validate_domain_input "Zurg Local Domain" "zurg.local" "ZURG_LOCAL_DOMAIN"
+validate_domain_input "Zurger Domain (FQDN)" "zurger.example.com" "ZURGER_DOMAIN"
+validate_domain_input "Zurger Local Domain" "zurger.local" "ZURGER_LOCAL_DOMAIN"
+validate_domain_input "Zilean Domain (FQDN)" "zilean.example.com" "ZILEAN_DOMAIN"
+validate_domain_input "Zilean Local Domain" "zilean.local" "ZILEAN_LOCAL_DOMAIN"
+validate_domain_input "Overseerr Domain (FQDN)" "over.example.com" "OVERSEERR_DOMAIN"
+validate_domain_input "Overseerr Local Domain" "over.local" "OVERSEERR_LOCAL_DOMAIN"
+validate_domain_input "Riven Domain (FQDN)" "riven.example.com" "RIVEN_DOMAIN"
+validate_domain_input "Riven Local Domain" "riven.local" "RIVEN_LOCAL_DOMAIN"
 echo
 
 # ============================================================================
 # Static IP Configuration
 # ============================================================================
 print_info "=== Static IP Configuration (in plex_network subnet) ==="
-prompt_with_default "Zurg IP" "172.21.0.25" "ZURG_IP"
-prompt_with_default "Rclone IP" "172.21.0.43" "RCLONE_IP"
-prompt_with_default "Zurger IP" "172.21.0.26" "ZURGER_IP"
-prompt_with_default "Riven DB IP" "172.21.0.32" "RIVEN_DB_IP"
-prompt_with_default "Zilean IP" "172.21.0.28" "ZILEAN_IP"
-prompt_with_default "Overseerr IP" "172.21.0.29" "OVERSEERR_IP"
-prompt_with_default "Riven IP" "172.21.0.31" "RIVEN_IP"
-prompt_with_default "Riven Frontend IP" "172.21.0.30" "RIVEN_FRONTEND_IP"
-prompt_with_default "FlareSolverr IP" "172.21.0.20" "FLARESOLVERR_IP"
+
+validate_ip_input() {
+    local prompt_text="$1"
+    local default_value="$2"
+    local var_name="$3"
+    while true; do
+        prompt_with_default "$prompt_text" "$default_value" "$var_name"
+        if validate_ip "${!var_name}"; then
+            break
+        else
+            print_error "Invalid IP address format. Please use format: x.x.x.x"
+        fi
+    done
+}
+
+validate_ip_input "Zurg IP" "172.21.0.25" "ZURG_IP"
+validate_ip_input "Rclone IP" "172.21.0.43" "RCLONE_IP"
+validate_ip_input "Zurger IP" "172.21.0.26" "ZURGER_IP"
+validate_ip_input "Riven DB IP" "172.21.0.32" "RIVEN_DB_IP"
+validate_ip_input "Zilean IP" "172.21.0.28" "ZILEAN_IP"
+validate_ip_input "Overseerr IP" "172.21.0.29" "OVERSEERR_IP"
+validate_ip_input "Riven IP" "172.21.0.31" "RIVEN_IP"
+validate_ip_input "Riven Frontend IP" "172.21.0.30" "RIVEN_FRONTEND_IP"
+validate_ip_input "FlareSolverr IP" "172.21.0.20" "FLARESOLVERR_IP"
+
+# Check for IP conflicts
+print_info "Checking for IP address conflicts..."
+declare -a IPS=("$TRAEFIK_IP" "$ZURG_IP" "$RCLONE_IP" "$ZURGER_IP" "$RIVEN_DB_IP" "$ZILEAN_IP" "$OVERSEERR_IP" "$RIVEN_IP" "$RIVEN_FRONTEND_IP" "$FLARESOLVERR_IP")
+declare -A IP_COUNT
+for ip in "${IPS[@]}"; do
+    ((IP_COUNT["$ip"]++))
+done
+CONFLICTS=0
+for ip in "${!IP_COUNT[@]}"; do
+    if [[ ${IP_COUNT["$ip"]} -gt 1 ]]; then
+        print_error "IP address conflict detected: $ip is used ${IP_COUNT["$ip"]} times"
+        ((CONFLICTS++))
+    fi
+done
+if [[ $CONFLICTS -gt 0 ]]; then
+    print_error "Please fix IP address conflicts before continuing"
+    exit 1
+fi
+print_success "No IP address conflicts detected"
 echo
 
 # ============================================================================
